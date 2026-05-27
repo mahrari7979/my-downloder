@@ -24,3 +24,16 @@
 .youtube.com	TRUE	/	TRUE	0	YSC	hOD9ebH73qI
 .youtube.com	TRUE	/	TRUE	1795343449	__Secure-ROLLOUT_TOKEN	CJqy6-Ko8KfvHxCi0pvkmsiMAxj0he2939aUAw%3D%3D
 .youtube.com	TRUE	/	TRUE	1813971238	VISITOR_PRIVACY_METADATA	CgJQTBIiEh4SHAsMDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicgSg%3D%3D
+# Netscape HTTP Cookie File
+# https://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file! Do not edit.
+
+.instagram.com	TRUE	/	TRUE	1800547258	mid	aULTuQALAAG5GDUwVydCMTfUbtq3
+.instagram.com	TRUE	/	TRUE	1814404994	datr	KUcWaizyJKVjQjHMR89kyBtF
+.instagram.com	TRUE	/	TRUE	1811381198	ig_did	653E128E-1279-47F0-81C1-27AFD8FFB045
+.instagram.com	TRUE	/	TRUE	1780450073	dpr	1.25
+.instagram.com	TRUE	/	TRUE	1780450073	wd	1524x688
+.instagram.com	TRUE	/	TRUE	1814405270	csrftoken	LDe3ZWTQf68GpGQLd1fCJc6HhUHqJXf4
+.instagram.com	TRUE	/	TRUE	1787621270	ds_user_id	2466128746
+.instagram.com	TRUE	/	TRUE	1811381198	sessionid	2466128746%3AjWx3mRCl9Li38P%3A9%3AAYhkth6VrgQS8-UnwNO3YsOcUMbiVYmDQ3yD2rrPAQ
+.instagram.com	TRUE	/	TRUE	0	rur	"RVA\0542466128746\0541811381181:01fe6f67e3326ba71d80784d3dfffcf15ecdca4f00c26df92b0d9086c3c37db125d3cc37"
