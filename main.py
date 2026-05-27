@@ -1,85 +1,102 @@
 """
 ═══════════════════════════════════════════════
- Downloader API Server — Railway.app
+ Downloader API Server — Render.com
  ✦ Instagram / YouTube / Twitter / TikTok
+ ✦ With YouTube cookies support
 ═══════════════════════════════════════════════
 """
 
 from flask import Flask, request, jsonify
 import yt_dlp
 import os
-import re
 
 app = Flask(__name__)
 API_KEY = os.environ.get("API_KEY", "mySecretApiKey2024")
+COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
 def check_auth(req):
     return req.headers.get("X-API-Key") == API_KEY
 
-# ── YouTube ──
-def download_youtube(url, quality="720"):
-    ydl_opts = {
+def get_ydl_opts(extra={}):
+    opts = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
-        "format": f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<={quality}][ext=mp4]/best",
+        "nocheckcertificate": True,
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
+    opts.update(extra)
+    return opts
+
+# ── YouTube ──
+def download_youtube(url, quality="720"):
+    opts = get_ydl_opts({
+        "format": f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<={quality}][ext=mp4]/best[ext=mp4]/best",
+    })
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
+        # پیدا کردن url
+        video_url = None
+        if info.get("requested_formats"):
+            # merge format — url اول رو برمیگردونه
+            video_url = info["requested_formats"][0].get("url")
+        elif info.get("url"):
+            video_url = info["url"]
+        elif info.get("formats"):
+            for f in reversed(info["formats"]):
+                if f.get("url") and f.get("vcodec") != "none":
+                    video_url = f["url"]
+                    break
+
         return {
-            "url": info.get("url") or info["requested_formats"][0]["url"] if info.get("requested_formats") else None,
+            "url": video_url,
             "title": info.get("title", ""),
             "thumbnail": info.get("thumbnail", ""),
-            "duration": info.get("duration", 0),
             "type": "video",
         }
 
 def download_youtube_mp3(url):
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
+    opts = get_ydl_opts({
         "format": "bestaudio/best",
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    })
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
+        audio_url = info.get("url")
+        if not audio_url and info.get("formats"):
+            for f in reversed(info["formats"]):
+                if f.get("url") and f.get("acodec") != "none":
+                    audio_url = f["url"]
+                    break
         return {
-            "url": info.get("url"),
+            "url": audio_url,
             "title": info.get("title", ""),
             "type": "audio",
         }
 
 # ── Instagram ──
 def download_instagram(url):
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
+    opts = get_ydl_opts({
         "format": "best",
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    })
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         items = []
-        if info.get("_type") == "playlist" or info.get("entries"):
-            for entry in info.get("entries", []):
-                if entry.get("url"):
-                    items.append({
-                        "url": entry["url"],
-                        "type": "video" if entry.get("vcodec") != "none" else "image",
-                        "thumbnail": entry.get("thumbnail", ""),
-                    })
-        else:
-            url_result = info.get("url")
-            thumb = info.get("thumbnail", "")
-            is_video = info.get("vcodec") != "none" and info.get("vcodec") is not None
-            if url_result:
-                items.append({
-                    "url": url_result,
-                    "type": "video" if is_video else "image",
-                    "thumbnail": thumb,
-                })
+
+        entries = info.get("entries") or ([info] if info.get("url") or info.get("thumbnail") else [])
+
+        for entry in entries:
+            if not entry:
+                continue
+            u = entry.get("url")
+            thumb = entry.get("thumbnail", "")
+            is_video = entry.get("vcodec") not in (None, "none")
+
+            if u:
+                items.append({"url": u, "type": "video" if is_video else "image", "thumbnail": thumb})
             elif thumb:
                 items.append({"url": thumb, "type": "image"})
+
         return {
             "items": items,
             "caption": info.get("description", "") or info.get("title", ""),
@@ -87,25 +104,18 @@ def download_instagram(url):
 
 # ── Twitter ──
 def download_twitter(url):
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "format": "best",
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    opts = get_ydl_opts({"format": "best"})
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         items = []
-        if info.get("entries"):
-            for e in info["entries"]:
-                if e.get("url"):
-                    items.append({"url": e["url"], "type": "video" if e.get("vcodec") != "none" else "image"})
-        else:
-            if info.get("url"):
-                items.append({
-                    "url": info["url"],
-                    "type": "video" if info.get("vcodec") != "none" else "image",
-                })
+        entries = info.get("entries") or ([info] if info.get("url") else [])
+        for entry in entries:
+            if not entry:
+                continue
+            u = entry.get("url")
+            if u:
+                is_video = entry.get("vcodec") not in (None, "none")
+                items.append({"url": u, "type": "video" if is_video else "image"})
         return {
             "items": items,
             "caption": info.get("description", "") or info.get("title", ""),
@@ -113,13 +123,8 @@ def download_twitter(url):
 
 # ── TikTok ──
 def download_tiktok(url):
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "format": "best",
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    opts = get_ydl_opts({"format": "best"})
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         return {
             "items": [{"url": info["url"], "type": "video"}],
@@ -127,20 +132,23 @@ def download_tiktok(url):
         }
 
 # ══════════════════════════════════════════════
-#  API ROUTES
+#  ROUTES
 # ══════════════════════════════════════════════
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    cookie_exists = os.path.exists(COOKIES_FILE)
+    return jsonify({"status": "ok", "cookies": cookie_exists})
 
 @app.route("/youtube", methods=["POST"])
 def youtube():
-    if not check_auth(request): return jsonify({"error": "unauthorized"}), 401
-    data = request.json
+    if not check_auth(request):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.json or {}
     url = data.get("url")
     quality = data.get("quality", "720")
-    if not url: return jsonify({"error": "url required"}), 400
+    if not url:
+        return jsonify({"error": "url required"}), 400
     try:
         if quality == "mp3":
             result = download_youtube_mp3(url)
@@ -152,10 +160,12 @@ def youtube():
 
 @app.route("/instagram", methods=["POST"])
 def instagram():
-    if not check_auth(request): return jsonify({"error": "unauthorized"}), 401
-    data = request.json
+    if not check_auth(request):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.json or {}
     url = data.get("url")
-    if not url: return jsonify({"error": "url required"}), 400
+    if not url:
+        return jsonify({"error": "url required"}), 400
     try:
         result = download_instagram(url)
         return jsonify({"ok": True, **result})
@@ -164,10 +174,12 @@ def instagram():
 
 @app.route("/twitter", methods=["POST"])
 def twitter():
-    if not check_auth(request): return jsonify({"error": "unauthorized"}), 401
-    data = request.json
+    if not check_auth(request):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.json or {}
     url = data.get("url")
-    if not url: return jsonify({"error": "url required"}), 400
+    if not url:
+        return jsonify({"error": "url required"}), 400
     try:
         result = download_twitter(url)
         return jsonify({"ok": True, **result})
@@ -176,10 +188,12 @@ def twitter():
 
 @app.route("/tiktok", methods=["POST"])
 def tiktok():
-    if not check_auth(request): return jsonify({"error": "unauthorized"}), 401
-    data = request.json
+    if not check_auth(request):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.json or {}
     url = data.get("url")
-    if not url: return jsonify({"error": "url required"}), 400
+    if not url:
+        return jsonify({"error": "url required"}), 400
     try:
         result = download_tiktok(url)
         return jsonify({"ok": True, **result})
