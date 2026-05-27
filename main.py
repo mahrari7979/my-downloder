@@ -1,10 +1,6 @@
 """
-═══════════════════════════════════════════════
- Downloader API Server — Render.com
- ✦ Instagram / YouTube / Twitter / TikTok
-═══════════════════════════════════════════════
+Downloader API Server — Render.com
 """
-
 from flask import Flask, request, jsonify
 import yt_dlp
 import os
@@ -28,31 +24,30 @@ def get_ydl_opts(extra={}):
     opts.update(extra)
     return opts
 
-def extract_best_url(info):
-    """پیدا کردن بهترین لینک ویدیو از info"""
-    # اول formats رو چک کن
+def best_video_url(info):
+    """پیدا کردن بهترین URL ویدیو"""
     formats = info.get("formats") or []
     
-    # بهترین فرمت ویدیویی
-    video_formats = [f for f in formats if f.get("url") and f.get("vcodec") not in (None, "none", "") and f.get("acodec") not in (None, "none", "")]
-    if video_formats:
-        # بالاترین کیفیت
-        best = max(video_formats, key=lambda f: f.get("height") or 0)
+    # فرمت‌هایی که هم ویدیو هم صدا دارن
+    combined = [f for f in formats 
+                if f.get("url") 
+                and f.get("vcodec") not in (None, "none")
+                and f.get("acodec") not in (None, "none")]
+    if combined:
+        best = max(combined, key=lambda f: (f.get("height") or 0))
         return best["url"], "video"
     
-    # فرمت‌های فقط ویدیو
-    video_only = [f for f in formats if f.get("url") and f.get("vcodec") not in (None, "none", "")]
-    if video_only:
-        best = max(video_only, key=lambda f: f.get("height") or 0)
+    # هر فرمت ویدیویی
+    videos = [f for f in formats if f.get("url") and f.get("vcodec") not in (None, "none")]
+    if videos:
+        best = max(videos, key=lambda f: (f.get("height") or 0))
         return best["url"], "video"
     
     # url مستقیم
     if info.get("url"):
-        vcodec = info.get("vcodec", "")
-        is_video = vcodec and vcodec != "none"
-        return info["url"], "video" if is_video else "image"
+        return info["url"], "video"
     
-    # thumbnail به عنوان آخرین گزینه
+    # thumbnail
     if info.get("thumbnail"):
         return info["thumbnail"], "image"
     
@@ -60,19 +55,11 @@ def extract_best_url(info):
 
 # ── YouTube ──
 def download_youtube(url, quality="720"):
-    opts = get_ydl_opts({
-        "format": f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best",
-    })
+    # اول بدون فرمت خاص امتحان کن
+    opts = get_ydl_opts({"format": "best"})
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        
-        video_url = None
-        if info.get("requested_formats"):
-            video_url = info["requested_formats"][0].get("url")
-        
-        if not video_url:
-            video_url, _ = extract_best_url(info)
-        
+        video_url, _ = best_video_url(info)
         return {
             "url": video_url,
             "title": info.get("title", ""),
@@ -84,80 +71,63 @@ def download_youtube_mp3(url):
     opts = get_ydl_opts({"format": "bestaudio/best"})
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        
-        audio_url = None
         formats = info.get("formats") or []
-        audio_formats = [f for f in formats if f.get("url") and f.get("acodec") not in (None, "none", "") and f.get("vcodec") in (None, "none", "")]
         
-        if audio_formats:
-            best = max(audio_formats, key=lambda f: f.get("abr") or 0)
-            audio_url = best["url"]
-        elif info.get("url"):
-            audio_url = info["url"]
+        # بهترین فرمت صوتی
+        audio = [f for f in formats if f.get("url") and f.get("acodec") not in (None, "none")]
+        if audio:
+            best = max(audio, key=lambda f: f.get("abr") or 0)
+            return {"url": best["url"], "title": info.get("title", ""), "type": "audio"}
         
-        return {
-            "url": audio_url,
-            "title": info.get("title", ""),
-            "type": "audio",
-        }
+        if info.get("url"):
+            return {"url": info["url"], "title": info.get("title", ""), "type": "audio"}
+        
+        raise Exception("no audio found")
 
 # ── Instagram ──
 def download_instagram(url):
-    opts = get_ydl_opts({
-        "format": "bestvideo+bestaudio/best",
-    })
+    opts = get_ydl_opts({"format": "best"})
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         items = []
-        
         entries = info.get("entries")
         
         if entries:
-            # آلبوم / چند رسانه
             for entry in entries:
-                if not entry:
-                    continue
-                media_url, media_type = extract_best_url(entry)
-                if media_url:
-                    items.append({
-                        "url": media_url,
-                        "type": media_type,
-                        "thumbnail": entry.get("thumbnail", ""),
-                    })
+                if not entry: continue
+                u, t = best_video_url(entry)
+                if u:
+                    items.append({"url": u, "type": t, "thumbnail": entry.get("thumbnail", "")})
         else:
-            # یه پست / ریلز
-            media_url, media_type = extract_best_url(info)
-            if media_url:
-                items.append({
-                    "url": media_url,
-                    "type": media_type,
-                    "thumbnail": info.get("thumbnail", ""),
-                })
+            u, t = best_video_url(info)
+            if u:
+                items.append({"url": u, "type": t, "thumbnail": info.get("thumbnail", "")})
+        
+        # اگه هیچی پیدا نشد thumbnail رو بده
+        if not items and info.get("thumbnail"):
+            items.append({"url": info["thumbnail"], "type": "image"})
         
         return {
             "items": items,
             "caption": (info.get("description") or info.get("title") or "")[:500],
         }
 
-# ── Twitter / X ──
+# ── Twitter ──
 def download_twitter(url):
-    opts = get_ydl_opts({"format": "bestvideo+bestaudio/best"})
+    opts = get_ydl_opts({"format": "best"})
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         items = []
-        
         entries = info.get("entries")
+        
         if entries:
             for entry in entries:
-                if not entry:
-                    continue
-                media_url, media_type = extract_best_url(entry)
-                if media_url:
-                    items.append({"url": media_url, "type": media_type})
+                if not entry: continue
+                u, t = best_video_url(entry)
+                if u: items.append({"url": u, "type": t})
         else:
-            media_url, media_type = extract_best_url(info)
-            if media_url:
-                items.append({"url": media_url, "type": media_type})
+            u, t = best_video_url(info)
+            if u: items.append({"url": u, "type": t})
         
         return {
             "items": items,
@@ -166,18 +136,16 @@ def download_twitter(url):
 
 # ── TikTok ──
 def download_tiktok(url):
-    opts = get_ydl_opts({"format": "bestvideo+bestaudio/best"})
+    opts = get_ydl_opts({"format": "best"})
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        media_url, media_type = extract_best_url(info)
+        u, t = best_video_url(info)
         return {
-            "items": [{"url": media_url, "type": media_type or "video"}],
+            "items": [{"url": u, "type": t or "video"}],
             "caption": (info.get("title") or "")[:500],
         }
 
-# ══════════════════════════════════════════════
-#  ROUTES
-# ══════════════════════════════════════════════
+# ══════ ROUTES ══════
 
 @app.route("/health")
 def health():
